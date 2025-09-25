@@ -63,14 +63,22 @@ func (a *AzureKeyVault) Get(ctx context.Context, id string) (*StoredSecret, erro
 	return a.GetLatest(ctx)
 }
 
-// GetLatest retrieves the latest version of a secret from Azure Key Vault.
+// retrieves the latest version of a secret from Azure Key Vault.
 func (a *AzureKeyVault) GetLatest(ctx context.Context) (*StoredSecret, error) {
 	resp, err := a.client.GetSecret(ctx, a.secretName, "", nil)
 	if err != nil {
 		return nil, err
 	}
+	// The CreatedOn field is in the Properties of the response.
+	// We need to dereference it to get the time.Time value.
+	var createdAt time.Time
+	if resp.SecretBundle.Attributes != nil && resp.SecretBundle.Attributes.Created != nil {
+		createdAt = *resp.SecretBundle.Attributes.Created
+	}
+
 	return &StoredSecret{
-		Value: []byte(*resp.Value),
+		Value:     []byte(*resp.Value),
+		CreatedAt: createdAt,
 	}, nil
 }
 

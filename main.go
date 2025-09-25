@@ -19,6 +19,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const locksmithBanner = `
+█  ▄▄▄  ▗▞▀▘█  ▄  ▄▄▄ ▄▄▄▄  ▄    ■  ▐▌   
+█ █   █ ▝▚▄▖█▄▀  ▀▄▄  █ █ █ ▄ ▗▄▟▙▄▖▐▌   
+█ ▀▄▄▄▀     █ ▀▄ ▄▄▄▀ █   █ █   ▐▌  ▐▛▀▚▖
+█           █  █            █   ▐▌  ▐▌ ▐▌
+                                ▐▌       
+`
+
 // Styles holds the lipgloss styles for the UI.
 type Styles struct {
 	App      lipgloss.Style
@@ -56,9 +64,11 @@ type model struct {
 
 type appState int
 type executionMode int
+type initialAction int
 
 const (
-	choosingProvider appState = iota
+	choosingAction appState = iota
+	choosingProvider
 	enteringConfig
 	choosingNotifier
 	choosingMode
@@ -73,6 +83,11 @@ const (
 	runPeriodic
 )
 
+const (
+	actionRotate initialAction = iota
+	actionCheckStatus
+)
+
 func initialModel() model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -80,7 +95,7 @@ func initialModel() model {
 
 	return model{
 		providerChoices:   []string{"GCP", "AWS", "Azure"},
-		state:             choosingProvider,
+		state:             choosingAction,
 		notifierChoices:   []string{"Sentry", "Slack"},
 		selectedNotifiers: make(map[int]struct{}),
 		spinner:           s,
@@ -99,6 +114,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch m.state {
+		case choosingAction:
+			return updateChoosingAction(msg, m)
 		case choosingProvider:
 			return updateChoosingProvider(msg, m)
 		case enteringConfig:
@@ -128,12 +145,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = done
 		m.message = "Deployment script generated: " + msg.filename
 		return m, tea.Quit
+	case *statusMsg:
+		m.state = done
+		m.message = fmt.Sprintf("Last rotation: %s", msg.lastRotated.Format(time.RFC3339))
+		return m, tea.Quit
 	}
 
 	m.spinner, cmd = m.spinner.Update(msg)
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+func updateChoosingAction(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < 1 {
+			m.cursor++
+		}
+	case "enter":
+		if initialAction(m.cursor) == actionCheckStatus {
+			m.state = rotating // we can reuse this state to show a spinner
+			return m, checkStatus(m)
+		}
+		m.state = choosingProvider
+		m.cursor = 0
+		m.configInputs = setupConfigInputs(m.provider)
+		return m, m.configInputs[0].Focus()
+	}
+	return m, nil
 }
 
 func updateChoosingProvider(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
@@ -167,6 +213,10 @@ func updateEnteringConfig(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "enter":
 		if m.cursor == len(m.configInputs) {
+			if initialAction(m.cursor) == actionCheckStatus {
+				m.state = rotating // we can reuse this state to show a spinner
+				return m, checkStatus(m)
+			}
 			m.state = choosingNotifier
 			m.cursor = 0
 			return m, nil
@@ -260,9 +310,24 @@ func updateChoosingMode(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	var b strings.Builder
 
+	b.WriteString(m.styles.Title.Render(locksmithBanner))
+	b.WriteString("\n")
+
 	switch m.state {
+	case choosingAction:
+		b.WriteString(m.styles.Title.Render("What would you like to do?"))
+		b.WriteString("\n")
+		actions := []string{"Rotate Secrets", "Check Status"}
+		for i, action := range actions {
+			if m.cursor == i {
+				b.WriteString(m.styles.Selected.Render(action))
+			} else {
+				b.WriteString(m.styles.Choice.Render(action))
+			}
+			b.WriteString("\n")
+		}
 	case choosingProvider:
-		b.WriteString(m.styles.Title.Render("Select the cloud provider for secret storage:"))
+		b.WriteString(m.styles.Title.Render("Select the cloud provider:"))
 		b.WriteString("\n")
 		for i, choice := range m.providerChoices {
 			if m.cursor == i {
@@ -430,6 +495,39 @@ func runRotation(m model) tea.Cmd {
 	}
 }
 
+func checkStatus(m model) tea.Cmd {
+	return func() tea.Msg {
+		config := make(map[string]string)
+		for _, input := range m.configInputs {
+			config[strings.ToLower(strings.ReplaceAll(input.Placeholder, " ", ""))] = input.Value()
+		}
+
+		var storageProvider storage.SecretStorage
+		switch m.provider {
+		case "GCP":
+			storageProvider = storage.NewGCPSecretManager()
+		case "AWS":
+			storageProvider = storage.NewAWSSecretsManager()
+		case "Azure":
+			storageProvider = storage.NewAzureKeyVault()
+		}
+
+		ctx := context.Background()
+		if err := storageProvider.Setup(ctx, config); err != nil {
+			return &rotationErrMsg{err}
+		}
+
+		latestSecret, err := storageProvider.GetLatest(ctx)
+		if err != nil {
+			return &rotationErrMsg{err}
+		}
+
+		return &statusMsg{
+			lastRotated: latestSecret.CreatedAt,
+		}
+	}
+}
+
 func generateScriptCmd(m model) tea.Cmd {
 	return func() tea.Msg {
 		config := make(map[string]string)
@@ -466,6 +564,7 @@ func generateScriptCmd(m model) tea.Cmd {
 
 type scriptGeneratedMsg struct{ filename string }
 type rotationMsg struct{}
+type statusMsg struct{ lastRotated time.Time }
 type rotationErrMsg struct{ err error }
 
 func (e *rotationErrMsg) Error() string {

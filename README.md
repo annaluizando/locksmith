@@ -1,5 +1,11 @@
-# Cloud Secrets Rotator
+# locksmith - Cloud Secrets Rotator
 
+█  ▄▄▄  ▗▞▀▘█  ▄  ▄▄▄ ▄▄▄▄  ▄    ■  ▐▌   
+█ █   █ ▝▚▄▖█▄▀  ▀▄▄  █ █ █ ▄ ▗▄▟▙▄▖▐▌   
+█ ▀▄▄▄▀     █ ▀▄ ▄▄▄▀ █   █ █   ▐▌  ▐▛▀▚▖
+█           █  █            █   ▐▌  ▐▌ ▐▌
+                                ▐▌       
+                                         
 Flexible tool written in Go for automating the rotation of secrets. It is designed to be a hybrid-cloud solution that helps you improve your security posture by regularly rotating sensitive credentials.
 
 While the core rotation engine is generic, the tool is currently focused on rotating **JWT Signing Secrets**.
@@ -79,6 +85,20 @@ The tool is built on a modular and extensible architecture:
 -   **`Notifier` Interface:** A pluggable notification interface that makes it easy to add new observability tools.
 
 This design makes the tool easy to maintain and extend with new secret types, storage backends, or notifiers in the future.
+
+---
+
+## Slack Bot for Status Checks
+
+As an alternative to the CLI, you can deploy a serverless Slack bot that can be queried for the last rotation status.
+
+1.  **Deploy the Bot:** The code for the bot is in the `deployment/slack-bot` directory. You can deploy it as a serverless function (e.g., AWS Lambda).
+2.  **Configure Environment Variables:** The bot needs the same cloud provider credentials and configuration as the rotation function.
+3.  **Create a Slack App:** In your Slack workspace, create a new Slack App.
+4.  **Create a Slash Command:** In your app's settings, create a new slash command:
+    -   **Command:** `/locksmith`
+    -   **Request URL:** The URL of your deployed serverless function.
+5.  **Usage:** Once configured, any user in your workspace can type `/locksmith status` in a channel to get the timestamp of the last secret rotation.
 
 ---
 

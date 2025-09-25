@@ -81,22 +81,33 @@ func (g *GCPSecretManager) Get(ctx context.Context, id string) (*StoredSecret, e
 	return nil, fmt.Errorf("secret with id %s not found", id)
 }
 
-// GetLatest retrieves the latest version of a secret.
+// retrieves the latest version of a secret.
 func (g *GCPSecretManager) GetLatest(ctx context.Context) (*StoredSecret, error) {
-	req := &secretmanagerpb.AccessSecretVersionRequest{
-		Name: fmt.Sprintf("projects/%s/secrets/%s/versions/latest", g.projectID, g.secretID),
+	// To get the creation time, we need to list the versions.
+	req := &secretmanagerpb.ListSecretVersionsRequest{
+		Parent:   fmt.Sprintf("projects/%s/secrets/%s", g.projectID, g.secretID),
+		PageSize: 1, // We only need the latest one
+	}
+	it := g.client.ListSecretVersions(ctx, req)
+	latestVersion, err := it.Next()
+	if err == iterator.Done {
+		return nil, fmt.Errorf("no secret versions found for %s", g.secretID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to list secret versions: %w", err)
 	}
 
-	result, err := g.client.AccessSecretVersion(ctx, req)
+	// Now access the payload of the latest version
+	result, err := g.client.AccessSecretVersion(ctx, &secretmanagerpb.AccessSecretVersionRequest{
+		Name: latestVersion.Name,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to access latest secret version: %w", err)
 	}
 
-	// We don't have our custom ID or CreatedAt time here directly.
-	// We could potentially parse it from the version name or get it from labels if we set them.
-	// For now, we return what we have.
 	return &StoredSecret{
-		Value: result.Payload.Data,
+		Value:     result.Payload.Data,
+		CreatedAt: latestVersion.CreateTime.AsTime(),
 	}, nil
 }
 
