@@ -1,10 +1,12 @@
 # locksmith - Cloud Secrets Rotator
 
+```
 █  ▄▄▄  ▗▞▀▘█  ▄  ▄▄▄ ▄▄▄▄  ▄    ■  ▐▌   
 █ █   █ ▝▚▄▖█▄▀  ▀▄▄  █ █ █ ▄ ▗▄▟▙▄▖▐▌   
 █ ▀▄▄▄▀     █ ▀▄ ▄▄▄▀ █   █ █   ▐▌  ▐▛▀▚▖
 █           █  █            █   ▐▌  ▐▌ ▐▌
                                 ▐▌       
+```
                                          
 Flexible tool written in Go for automating the rotation of secrets. It is designed to be a hybrid-cloud solution that helps you improve your security posture by regularly rotating sensitive credentials.
 
