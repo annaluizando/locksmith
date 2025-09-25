@@ -60,6 +60,7 @@ type model struct {
 	spinner           spinner.Model
 	styles            *Styles
 	message           string
+	initialAction     initialAction
 }
 
 type appState int
@@ -170,14 +171,11 @@ func updateChoosingAction(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 	case "enter":
-		if initialAction(m.cursor) == actionCheckStatus {
-			m.state = rotating // we can reuse this state to show a spinner
-			return m, checkStatus(m)
-		}
+		m.initialAction = initialAction(m.cursor)
+
 		m.state = choosingProvider
 		m.cursor = 0
-		m.configInputs = setupConfigInputs(m.provider)
-		return m, m.configInputs[0].Focus()
+		return m, nil
 	}
 	return m, nil
 }
@@ -213,7 +211,7 @@ func updateEnteringConfig(msg tea.KeyMsg, m model) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "enter":
 		if m.cursor == len(m.configInputs) {
-			if initialAction(m.cursor) == actionCheckStatus {
+			if m.initialAction == actionCheckStatus {
 				m.state = rotating // we can reuse this state to show a spinner
 				return m, checkStatus(m)
 			}
@@ -497,6 +495,10 @@ func runRotation(m model) tea.Cmd {
 
 func checkStatus(m model) tea.Cmd {
 	return func() tea.Msg {
+		if m.provider == "" {
+			return &rotationErrMsg{fmt.Errorf("provider not selected")}
+		}
+
 		config := make(map[string]string)
 		for _, input := range m.configInputs {
 			config[strings.ToLower(strings.ReplaceAll(input.Placeholder, " ", ""))] = input.Value()
@@ -510,6 +512,12 @@ func checkStatus(m model) tea.Cmd {
 			storageProvider = storage.NewAWSSecretsManager()
 		case "Azure":
 			storageProvider = storage.NewAzureKeyVault()
+		default:
+			return &rotationErrMsg{fmt.Errorf("unsupported provider: %s", m.provider)}
+		}
+
+		if storageProvider == nil {
+			return &rotationErrMsg{fmt.Errorf("failed to create storage provider for %s", m.provider)}
 		}
 
 		ctx := context.Background()
